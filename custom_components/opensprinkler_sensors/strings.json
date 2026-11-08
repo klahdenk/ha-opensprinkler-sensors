@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to OpenSprinkler",
+        "description": "Soil moisture readings need OpenSprinklerShop firmware 2.3.0 or newer with the Analog Sensor API. \"Last on\" times work on any firmware.",
+        "data": {
+          "host": "Host",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or URL of the controller, e.g. 192.168.1.50 or opensprinkler.local:8080",
+          "password": "The device password, or its MD5 hash. Only the hash is stored."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-enter the OpenSprinkler password",
+        "description": "The controller at {url} rejected the stored password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to an OpenSprinkler controller at that address.",
+      "invalid_auth": "The controller rejected the password.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This controller is already configured.",
+      "reauth_successful": "Password updated."
+    }
+  }
+}
