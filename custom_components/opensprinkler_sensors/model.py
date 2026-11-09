@@ -253,39 +253,60 @@ def station_key(index: int) -> str:
 
 
 class LastOnTracker:
-    """Remembers the most recent time each zone / sensor input was on.
+    """Remembers when each zone / sensor input was last on, and for how long.
 
     Fed from three sources, newest wins:
-    - the controller log (``/jl``), which has exact end times for every run
-      and for sensor-input activations;
-    - ``lrun`` in ``/jc``, the end time of the most recently finished run;
-    - live status: anything on right now is "last on" *now*.
+    - the controller log (``/jl``), which has exact end times and durations for
+      every run and for sensor-input activations;
+    - ``lrun`` in ``/jc``, the end time and duration of the most recently
+      finished run;
+    - live status: anything on right now is "last on" *now*, with the time
+      elapsed so far as its duration (from the program start time in ``ps``
+      when the controller reports one, else from when we first saw it on).
     """
 
     def __init__(self) -> None:
         self._last: dict[str, datetime] = {}
+        self._duration: dict[str, int] = {}
+        self._on_since: dict[str, datetime] = {}
 
     def get(self, key: str) -> datetime | None:
+        """End of the most recent run, or the latest poll while still on."""
         return self._last.get(key)
 
-    def record(self, key: str, when: datetime | None) -> None:
+    def duration(self, key: str) -> int | None:
+        """Length of that run in seconds (elapsed so far while still on)."""
+        return self._duration.get(key)
+
+    def record(self, key: str, when: datetime | None, duration: Any = None) -> None:
         if when is None:
             return
+        seconds = (
+            max(0, int(duration))
+            if isinstance(duration, (int, float)) and not isinstance(duration, bool)
+            else None
+        )
         current = self._last.get(key)
         if current is None or when > current:
             self._last[key] = when
+            if seconds is None:
+                self._duration.pop(key, None)
+            else:
+                self._duration[key] = seconds
+        elif when == current and seconds is not None and key not in self._duration:
+            self._duration[key] = seconds
 
     def seed_from_log(self, records: list[Any], offset: int) -> None:
         """Ingest ``/jl`` records: ``[pid, sid, duration, end_time, (flow)]``."""
         for record in records:
             if not isinstance(record, list) or len(record) < 4:
                 continue
-            pid, sid, _duration, end = record[:4]
+            pid, sid, duration, end = record[:4]
             when = local_epoch_to_utc(end, offset)
             if pid == 0 and sid in SENSOR_INPUT_KEYS:
-                self.record(sid, when)
+                self.record(sid, when, duration)
             elif pid != 0 and isinstance(sid, int) and not isinstance(sid, bool):
-                self.record(station_key(sid), when)
+                self.record(station_key(sid), when, duration)
 
     def update(
         self,
@@ -296,9 +317,24 @@ class LastOnTracker:
         offset: int,
     ) -> None:
         """Apply one poll's worth of live state."""
+        program_status = controller.get("ps")
+        if not isinstance(program_status, list):
+            program_status = []
+
         for index, on in enumerate(station_status):
-            if on:
-                self.record(station_key(index), now)
+            key = station_key(index)
+            if not on:
+                self._on_since.pop(key, None)
+                continue
+            start = None
+            if index < len(program_status):
+                entry = program_status[index]
+                # ps entry: [program_index, remaining_seconds, start_time, ...]
+                if isinstance(entry, list) and len(entry) >= 3 and entry[0]:
+                    start = local_epoch_to_utc(entry[2], offset)
+            if start is None or start > now:
+                start = self._on_since.setdefault(key, now)
+            self.record(key, now, (now - start).total_seconds())
 
         lrun = controller.get("lrun")
         if (
@@ -307,11 +343,14 @@ class LastOnTracker:
             and isinstance(lrun[0], int)
             and not isinstance(lrun[0], bool)
         ):
-            self.record(station_key(lrun[0]), local_epoch_to_utc(lrun[3], offset))
+            self.record(station_key(lrun[0]), local_epoch_to_utc(lrun[3], offset), lrun[2])
 
         for key in SENSOR_INPUT_KEYS:
             if controller.get(f"sn{key[1]}") == 1:
-                self.record(key, now)
+                start = self._on_since.setdefault(key, now)
+                self.record(key, now, (now - start).total_seconds())
+            else:
+                self._on_since.pop(key, None)
 
 
 def is_on(key: str, station_status: list[int], controller: dict[str, Any]) -> bool:

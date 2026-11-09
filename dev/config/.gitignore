@@ -1,0 +1,7 @@
+# Everything Home Assistant writes at runtime stays out of git.
+*
+!.gitignore
+!configuration.yaml
+!dashboard.yaml
+!custom_components/
+!custom_components/opensprinkler_sensors

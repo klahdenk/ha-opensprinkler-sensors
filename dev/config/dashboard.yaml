@@ -1,0 +1,80 @@
+# The README's example cards, using built-in cards only (no HACS frontend
+# plugins needed), wired to the entities dev/fake_controller.py produces.
+title: OpenSprinkler
+views:
+  - title: Garden
+    path: garden
+    cards:
+      - type: grid
+        title: Soil moisture
+        columns: 3
+        square: false
+        cards:
+          - type: gauge
+            entity: sensor.opensprinkler_tomatoes
+            name: Tomatoes
+            needle: true
+            min: 0
+            max: 100
+            segments:
+              - { from: 0, color: "#db4437" }
+              - { from: 20, color: "#ffa600" }
+              - { from: 35, color: "#43a047" }
+              - { from: 70, color: "#039be5" }
+          - type: gauge
+            entity: sensor.opensprinkler_basil
+            name: Basil
+            needle: true
+            min: 0
+            max: 100
+            segments:
+              - { from: 0, color: "#db4437" }
+              - { from: 20, color: "#ffa600" }
+              - { from: 35, color: "#43a047" }
+              - { from: 70, color: "#039be5" }
+          - type: gauge
+            entity: sensor.opensprinkler_lawn
+            name: Lawn
+            needle: true
+            min: 0
+            max: 100
+            segments:
+              - { from: 0, color: "#db4437" }
+              - { from: 20, color: "#ffa600" }
+              - { from: 35, color: "#43a047" }
+              - { from: 70, color: "#039be5" }
+
+      - type: markdown
+        title: Last on
+        content: |
+          {%- macro duration(s) -%}
+            {%- if s is none -%}—
+            {%- elif s >= 3600 -%}{{ s // 3600 }} h {{ (s % 3600) // 60 }} min
+            {%- elif s >= 60 -%}{{ s // 60 }} min{{ (' ' ~ (s % 60) ~ ' s') if s % 60 else '' }}
+            {%- else -%}{{ s }} s
+            {%- endif -%}
+          {%- endmacro %}
+          {% set all = expand(integration_entities('opensprinkler_sensors') | select('search', '_last_on$') | list) %}
+          {% set never = ['unknown', 'unavailable'] %}
+          {% set rows = (all | rejectattr('state', 'in', never) | sort(attribute='state', reverse=true) | list)
+                        + (all | selectattr('state', 'in', never) | list) %}
+          | | Last on | Ran for |
+          |:--|--:|--:|
+          {% for s in rows -%}
+          | {{ s.name | replace('OpenSprinkler ', '') | replace(' last on', '') }} | {{ '🟢 running' if s.attributes.on else ('—' if s.state in never else relative_time(s.state | as_datetime) ~ ' ago') }} | {{ duration(s.attributes.last_run_duration) }} |
+          {% endfor %}
+
+      - type: history-graph
+        title: Moisture today
+        hours_to_show: 6
+        entities:
+          - entity: sensor.opensprinkler_tomatoes
+            name: Tomatoes
+          - entity: sensor.opensprinkler_basil
+            name: Basil
+          - entity: sensor.opensprinkler_lawn
+            name: Lawn
+
+      - type: tile
+        entity: sensor.opensprinkler_bed_temperature
+        name: Bed temperature

@@ -36,6 +36,8 @@ def controller_payloads() -> dict[str, Any]:
             "sn2": 0,
             "rd": 0,
             "lrun": [2, 1, 600, local(60)],
+            # [program, remaining s, start time] per zone; Back lawn started 100 s ago.
+            "ps": [[0, 0, 0], [1, 500, local(100)]] + [[0, 0, 0]] * 6,
             "mac": MAC,
         },
         "jo": {"fwv": 240, "fwm": 199, "tz": 56, "sn1t": 1, "sn2t": 3},

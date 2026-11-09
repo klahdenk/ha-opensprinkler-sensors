@@ -220,11 +220,17 @@ class LastOnSensor(OpenSprinklerEntity, RestoreSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data
-        return {"on": is_on(self._key, data.station_status, data.controller)}
+        return {
+            "on": is_on(self._key, data.station_status, data.controller),
+            # Seconds; elapsed so far while the zone / input is still on.
+            "last_run_duration": self.coordinator.tracker.duration(self._key),
+        }
 
     async def async_added_to_hass(self) -> None:
         """Merge the value saved before restart with what the log already told us."""
         await super().async_added_to_hass()
         last = await self.async_get_last_sensor_data()
         if last is not None and isinstance(last.native_value, datetime):
-            self.coordinator.tracker.record(self._key, last.native_value)
+            last_state = await self.async_get_last_state()
+            duration = last_state.attributes.get("last_run_duration") if last_state else None
+            self.coordinator.tracker.record(self._key, last.native_value, duration)

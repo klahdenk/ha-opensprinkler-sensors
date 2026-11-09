@@ -184,3 +184,78 @@ def test_is_on() -> None:
     assert not is_on("s2", [], controller)
     assert is_on("station_1", [0, 1], controller)
     assert not is_on("station_5", [0, 1], controller)
+
+
+def test_tracker_durations_from_log_and_lrun() -> None:
+    tracker = LastOnTracker()
+    tracker.seed_from_log([[1, 0, 900, LOCAL_NOW - 3600], [0, "s1", 1200, LOCAL_NOW - 600]], OFFSET)
+    assert tracker.duration("station_0") == 900
+    assert tracker.duration("s1") == 1200
+
+    tracker.update(
+        now=NOW,
+        station_status=[0, 0, 0],
+        controller={"lrun": [2, 1, 600, LOCAL_NOW - 60]},
+        offset=OFFSET,
+    )
+    assert tracker.duration("station_2") == 600
+
+
+def test_tracker_running_elapsed_from_program_start() -> None:
+    tracker = LastOnTracker()
+    tracker.update(
+        now=NOW,
+        station_status=[0, 1],
+        controller={"ps": [[0, 0, 0], [1, 200, LOCAL_NOW - 100]]},
+        offset=OFFSET,
+    )
+    assert tracker.get("station_1") == NOW
+    assert tracker.duration("station_1") == 100
+
+
+def test_tracker_running_elapsed_without_program_start() -> None:
+    """Without ps, elapsed time counts from the first poll that saw the zone on."""
+    tracker = LastOnTracker()
+    for seconds in (0, 30):
+        tracker.update(
+            now=NOW + timedelta(seconds=seconds),
+            station_status=[1],
+            controller={},
+            offset=OFFSET,
+        )
+    assert tracker.duration("station_0") == 30
+
+    # It finished between polls: lrun has the exact end and duration.
+    tracker.update(
+        now=NOW + timedelta(seconds=60),
+        station_status=[0],
+        controller={"lrun": [0, 1, 45, LOCAL_NOW + 50]},
+        offset=OFFSET,
+    )
+    assert tracker.get("station_0") == NOW + timedelta(seconds=50)
+    assert tracker.duration("station_0") == 45
+
+    # The next run starts its own clock.
+    tracker.update(now=NOW + timedelta(seconds=300), station_status=[1], controller={}, offset=OFFSET)
+    assert tracker.duration("station_0") == 0
+
+
+def test_tracker_sensor_input_duration() -> None:
+    tracker = LastOnTracker()
+    tracker.update(now=NOW, station_status=[], controller={"sn1": 1}, offset=OFFSET)
+    tracker.update(now=NOW + timedelta(seconds=40), station_status=[], controller={"sn1": 1}, offset=OFFSET)
+    assert tracker.duration("s1") == 40
+    tracker.update(now=NOW + timedelta(seconds=70), station_status=[], controller={"sn1": 0}, offset=OFFSET)
+    assert tracker.duration("s1") == 40
+    tracker.update(now=NOW + timedelta(seconds=100), station_status=[], controller={"sn1": 1}, offset=OFFSET)
+    assert tracker.duration("s1") == 0
+
+
+def test_tracker_newer_run_without_duration_clears_old_duration() -> None:
+    tracker = LastOnTracker()
+    tracker.record("station_0", NOW, 30)
+    tracker.record("station_0", NOW + timedelta(minutes=1))
+    assert tracker.duration("station_0") is None
+    # Same end time reported again with a duration fills it in.
+    tracker.record("station_0", NOW + timedelta(minutes=1), 20)
+    assert tracker.duration("station_0") == 20

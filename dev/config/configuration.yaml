@@ -1,0 +1,36 @@
+# Throwaway Home Assistant config for previewing the integration locally.
+# Start it with dev/preview.sh; see the README's "Preview" section.
+
+homeassistant:
+  name: OpenSprinkler preview
+  unit_system: metric
+  auth_providers:
+    # No login: localhost is trusted and the single preview user is picked automatically.
+    - type: trusted_networks
+      trusted_networks:
+        - 127.0.0.1
+        - ::1
+      allow_bypass_login: true
+    - type: homeassistant
+
+http:
+  server_host: 127.0.0.1
+  server_port: 8123
+
+frontend:
+config:
+history:
+
+logger:
+  default: warning
+  logs:
+    custom_components.opensprinkler_sensors: debug
+
+lovelace:
+  dashboards:
+    opensprinkler-preview:
+      mode: yaml
+      filename: dashboard.yaml
+      title: OpenSprinkler
+      icon: mdi:sprinkler-variant
+      show_in_sidebar: true

@@ -83,6 +83,21 @@ async def test_last_on_sensors(hass: HomeAssistant, mock_controller) -> None:
     assert hass.states.get("sensor.opensprinkler_soil_sensor_2_last_on").state == "unknown"
 
 
+async def test_last_run_duration(hass: HomeAssistant, mock_controller) -> None:
+    mock_controller()
+    await _setup(hass)
+
+    def duration(entity_id: str):
+        return hass.states.get(entity_id).attributes["last_run_duration"]
+
+    assert duration("sensor.opensprinkler_front_lawn_last_on") == 900  # from the log
+    assert duration("sensor.opensprinkler_beds_last_on") == 600  # from lrun
+    assert duration("sensor.opensprinkler_rain_sensor_last_on") == 1200  # s1 log event
+    # Running: elapsed since the program start time in ps.
+    assert abs(duration("sensor.opensprinkler_back_lawn_last_on") - 100) < 5
+    assert duration("sensor.opensprinkler_s05_last_on") is None
+
+
 async def test_last_on_survives_restart(hass: HomeAssistant, mock_controller) -> None:
     # S05 has nothing in the log, so only the value saved before restart can fill it in.
     earlier = dt_util.utcnow() - timedelta(days=30)
@@ -90,7 +105,11 @@ async def test_last_on_survives_restart(hass: HomeAssistant, mock_controller) ->
         hass,
         [
             (
-                State("sensor.opensprinkler_s05_last_on", earlier.isoformat()),
+                State(
+                    "sensor.opensprinkler_s05_last_on",
+                    earlier.isoformat(),
+                    {"last_run_duration": 1800},
+                ),
                 {
                     "native_value": {
                         "__type": "<class 'datetime.datetime'>",
@@ -104,6 +123,7 @@ async def test_last_on_survives_restart(hass: HomeAssistant, mock_controller) ->
     mock_controller()
     await _setup(hass)
     assert abs(_seconds_ago(hass, "sensor.opensprinkler_s05_last_on") - 30 * 86400) < 5
+    assert hass.states.get("sensor.opensprinkler_s05_last_on").attributes["last_run_duration"] == 1800
 
 
 async def test_disabled_zones_get_no_entity(hass: HomeAssistant, mock_controller) -> None:

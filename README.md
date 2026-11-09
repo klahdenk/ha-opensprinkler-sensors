@@ -57,8 +57,8 @@ appear automatically, with no reload needed.
 | Entity | Example | Notes |
 | --- | --- | --- |
 | Analog sensor | `sensor.opensprinkler_tomatoes` | Named as on the controller. Soil moisture sensors use the `moisture` device class and `%`. Attributes: `sensor_number`, `last_read`. |
-| Zone last on | `sensor.opensprinkler_front_lawn_last_on` | Timestamp. Disabled zones are skipped. Attribute `on` is `true` while the zone runs. |
-| Sensor input last on | `sensor.opensprinkler_rain_sensor_last_on` | For sensor inputs 1 and 2 when set to rain, soil or program switch. Flow meters are skipped. |
+| Zone last on | `sensor.opensprinkler_front_lawn_last_on` | Timestamp. Disabled zones are skipped. Attributes: `on` (`true` while the zone runs) and `last_run_duration` (seconds; elapsed so far while running). |
+| Sensor input last on | `sensor.opensprinkler_rain_sensor_last_on` | For sensor inputs 1 and 2 when set to rain, soil or program switch. Flow meters are skipped. Same attributes as zones. |
 
 "Last on" is the end of the most recent run, or *now* while the zone is
 running. It's built from the controller log (the last 7 days on startup, then
@@ -120,26 +120,47 @@ sort:
   numeric: true
 ```
 
-### Last on
+### Last on, with run duration
+
+A built-in markdown card that lists every zone and sensor input this
+integration knows about, most recent first, with how long each last ran:
 
 ```yaml
-type: custom:auto-entities
-card:
-  type: entities
-  title: Last on
-filter:
-  include:
-    - integration: opensprinkler_sensors
-      entity_id: "*_last_on"
-      options:
-        format: relative
-sort:
-  method: state
-  reverse: true
+type: markdown
+title: Last on
+content: |
+  {%- macro duration(s) -%}
+    {%- if s is none -%}—
+    {%- elif s >= 3600 -%}{{ s // 3600 }} h {{ (s % 3600) // 60 }} min
+    {%- elif s >= 60 -%}{{ s // 60 }} min{{ (' ' ~ (s % 60) ~ ' s') if s % 60 else '' }}
+    {%- else -%}{{ s }} s
+    {%- endif -%}
+  {%- endmacro %}
+  {% set all = expand(integration_entities('opensprinkler_sensors') | select('search', '_last_on$') | list) %}
+  {% set never = ['unknown', 'unavailable'] %}
+  {% set rows = (all | rejectattr('state', 'in', never) | sort(attribute='state', reverse=true) | list)
+                + (all | selectattr('state', 'in', never) | list) %}
+  | | Last on | Ran for |
+  |:--|--:|--:|
+  {% for s in rows -%}
+  | {{ s.name | replace('OpenSprinkler ', '') | replace(' last on', '') }} | {{ '🟢 running' if s.attributes.on else ('—' if s.state in never else relative_time(s.state | as_datetime) ~ ' ago') }} | {{ duration(s.attributes.last_run_duration) }} |
+  {% endfor %}
 ```
 
-Or list them by hand with the built-in entities card, using `format: relative`
-on each row.
+## Preview locally
+
+`dev/` has a fake OpenSprinkler controller (`dev/fake_controller.py`: zones
+cycling every 5 minutes, drifting moisture, a rain sensor, a week of log
+history) and a throwaway Home Assistant config with a dashboard of the cards
+above. With Home Assistant installed in a Python 3.13 venv:
+
+```bash
+HASS=.venv/bin/hass dev/preview.sh
+```
+
+The first run onboards a local user and adds the integration, which takes a
+minute or two. Then open http://127.0.0.1:8123/opensprinkler-preview/garden; no
+login is needed from localhost. Run `git clean -fdX dev/config` to start over.
 
 ## Development
 
