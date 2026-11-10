@@ -15,12 +15,15 @@ from homeassistant.util import dt as dt_util
 from .api import OpenSprinklerClient
 from .const import DOMAIN, LOG_SEED_DAYS, LOGGER, SCAN_INTERVAL, SLOW_REFRESH_INTERVAL
 from .model import (
+    SENSOR_API_OFFICIAL,
+    SENSOR_API_SHOP,
     AnalogSensor,
     LastOnTracker,
     OpenSprinklerAuthError,
     OpenSprinklerError,
     OpenSprinklerNotSupportedError,
     parse_analog_sensors,
+    parse_official_sensors,
     sensor_input_types,
     station_disabled_flags,
     timezone_offset,
@@ -37,7 +40,7 @@ class OpenSprinklerData:
     station_disabled: list[bool]
     station_status: list[int]
     sensor_types: dict[str, int]
-    analog: dict[int, AnalogSensor] = field(default_factory=dict)
+    analog: dict[str, AnalogSensor] = field(default_factory=dict)
 
 
 class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
@@ -60,7 +63,9 @@ class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
         )
         self.client = client
         self.tracker = LastOnTracker()
-        self.analog_supported = False
+        # Which analog sensor API the firmware has: SENSOR_API_OFFICIAL (/jsn),
+        # SENSOR_API_SHOP (/sl + /sg), or None. Re-detected on each slow refresh.
+        self.sensor_api: str | None = None
         self._options: dict[str, Any] = {}
         self._names: dict[str, Any] = {}
         self._sensor_list: dict[str, Any] | None = None
@@ -74,7 +79,7 @@ class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
             if self._next_slow_refresh is None or now >= self._next_slow_refresh:
                 await self._async_slow_refresh(now, controller)
             status = await self.client.station_status()
-            values = await self.client.sensor_values() if self.analog_supported else None
+            analog_raw = await self._async_fetch_analog()
         except OpenSprinklerAuthError as err:
             raise ConfigEntryAuthFailed("OpenSprinkler rejected the password") from err
         except OpenSprinklerError as err:
@@ -98,7 +103,7 @@ class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
             station_disabled=station_disabled_flags(self._names, len(names)),
             station_status=station_status,
             sensor_types=sensor_input_types(self._options),
-            analog=(parse_analog_sensors(self._sensor_list, values, offset) if values is not None else {}),
+            analog=self._parse_analog(analog_raw, offset),
         )
 
     async def _async_slow_refresh(self, now: datetime, controller: dict[str, Any]) -> None:
@@ -106,15 +111,7 @@ class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
         self._options = await self.client.options()
         self._names = await self.client.station_names()
 
-        try:
-            self._sensor_list = await self.client.sensor_list()
-        except OpenSprinklerNotSupportedError:
-            if self.analog_supported or self._next_slow_refresh is None:
-                LOGGER.debug("Controller has no Analog Sensor API; skipping /sl and /sg")
-            self._sensor_list = None
-            self.analog_supported = False
-        else:
-            self.analog_supported = True
+        await self._async_detect_sensor_api()
 
         offset = timezone_offset(self._options, controller, now)
         days = 1 if self._log_seeded else LOG_SEED_DAYS
@@ -129,6 +126,38 @@ class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
             self._log_seeded = True
 
         self._next_slow_refresh = now + SLOW_REFRESH_INTERVAL
+
+    async def _async_detect_sensor_api(self) -> None:
+        """Prefer the official /jsn API, fall back to OpenSprinklerShop's /sl."""
+        previous = self.sensor_api
+        self._sensor_list = None
+        try:
+            await self.client.official_sensors()
+        except OpenSprinklerNotSupportedError:
+            try:
+                self._sensor_list = await self.client.sensor_list()
+            except OpenSprinklerNotSupportedError:
+                self.sensor_api = None
+            else:
+                self.sensor_api = SENSOR_API_SHOP
+        else:
+            self.sensor_api = SENSOR_API_OFFICIAL
+        if self.sensor_api != previous or self._next_slow_refresh is None:
+            LOGGER.debug("Analog sensor API: %s", self.sensor_api or "none")
+
+    async def _async_fetch_analog(self) -> dict[str, Any] | None:
+        if self.sensor_api == SENSOR_API_OFFICIAL:
+            return await self.client.official_sensors()
+        if self.sensor_api == SENSOR_API_SHOP:
+            return await self.client.sensor_values()
+        return None
+
+    def _parse_analog(self, raw: dict[str, Any] | None, offset: int) -> dict[str, AnalogSensor]:
+        if raw is None:
+            return {}
+        if self.sensor_api == SENSOR_API_OFFICIAL:
+            return parse_official_sensors(raw)
+        return parse_analog_sensors(self._sensor_list, raw, offset)
 
 
 type OpenSprinklerConfigEntry = ConfigEntry[OpenSprinklerCoordinator]

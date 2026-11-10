@@ -36,14 +36,14 @@ async def async_get_config_entry_diagnostics(
     return async_redact_data(
         {
             "entry": dict(entry.data),
-            "analog_supported": coordinator.analog_supported,
+            "sensor_api": coordinator.sensor_api,
             "controller": data.controller,
             "options": data.options,
             "station_names": data.station_names,
             "station_disabled": data.station_disabled,
             "station_status": data.station_status,
             "sensor_types": data.sensor_types,
-            "analog": {nr: asdict(sensor) for nr, sensor in data.analog.items()},
+            "analog": {key: asdict(sensor) for key, sensor in data.analog.items()},
         },
         TO_REDACT,
     )

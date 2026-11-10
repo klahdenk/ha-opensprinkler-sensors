@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from custom_components.opensprinkler_sensors.model import (
+    KIND_MOISTURE,
+    KIND_TEMPERATURE_C,
     SENSOR_TYPE_NONE,
     SENSOR_TYPE_RAIN,
     SENSOR_TYPE_SOIL,
@@ -19,6 +21,7 @@ from custom_components.opensprinkler_sensors.model import (
     local_epoch_to_utc,
     normalize_base_url,
     parse_analog_sensors,
+    parse_official_sensors,
     parse_response,
     password_hash,
     sensor_input_types,
@@ -118,13 +121,15 @@ def test_parse_analog_sensors() -> None:
         ]
     }
     sensors = parse_analog_sensors(sensor_list, values, OFFSET)
-    assert set(sensors) == {1, 3}
-    assert sensors[1].name == "Tomatoes"
-    assert sensors[1].value == 31.5
-    assert sensors[1].last_read == NOW
+    assert set(sensors) == {"analog_1", "analog_3"}
+    tomatoes = sensors["analog_1"]
+    assert (tomatoes.name, tomatoes.number, tomatoes.value) == ("Tomatoes", 1, 31.5)
+    assert tomatoes.kind == KIND_MOISTURE
+    assert tomatoes.last_read == NOW
     # Never read: no value, and a blank name falls back to the number.
-    assert sensors[3].value is None
-    assert sensors[3].name == "Sensor 3"
+    assert sensors["analog_3"].value is None
+    assert sensors["analog_3"].name == "Sensor 3"
+    assert sensors["analog_3"].kind is None
     assert parse_analog_sensors(None, {}, OFFSET) == {}
 
 
@@ -259,3 +264,44 @@ def test_tracker_newer_run_without_duration_clears_old_duration() -> None:
     # Same end time reported again with a duration fills it in.
     tracker.record("station_0", NOW + timedelta(minutes=1), 20)
     assert tracker.duration("station_0") == 20
+
+
+def test_parse_official_sensors() -> None:
+    data = {
+        "sn": [
+            {"uuid": 1, "name": "Center tree soil", "unit": 40, "status": 1, "value": 43.1132},
+            {"uuid": 2, "name": "Shed", "unit": 17, "status": 1 | 8, "value": 100.0},  # clamped: still valid
+            {"uuid": 3, "name": "Errored", "unit": 40, "status": 1 | 2, "value": 0.0},
+            {"uuid": 4, "name": "Stale", "unit": 40, "status": 1 | 4, "value": 12.0},
+            {"uuid": 5, "name": "Never read", "unit": 40, "status": 0, "value": 0.0},
+            {"uuid": 6, "name": " ", "unit": 2, "status": 1, "value": 410.0},  # ppm: no HA kind
+            {"uuid": 7, "name": "Odd unit", "unit": 250, "status": 1, "value": 1.0},
+            {"uuid": 0, "name": "bad id"},
+            "garbage",
+        ],
+        "count": 7,
+    }
+    sensors = parse_official_sensors(data)
+    assert set(sensors) == {f"sensor_{n}" for n in range(1, 8)}
+
+    soil = sensors["sensor_1"]
+    assert (soil.name, soil.number, soil.value, soil.unit, soil.kind) == (
+        "Center tree soil",
+        1,
+        43.1132,
+        "%VMC",
+        KIND_MOISTURE,
+    )
+    assert soil.last_read is None
+    assert sensors["sensor_2"].value == 100.0
+    assert sensors["sensor_2"].kind == KIND_TEMPERATURE_C
+    assert sensors["sensor_3"].value is None
+    assert sensors["sensor_4"].value is None
+    assert sensors["sensor_5"].value is None
+    assert (sensors["sensor_6"].name, sensors["sensor_6"].unit, sensors["sensor_6"].kind) == (
+        "Sensor 6",
+        "ppm",
+        None,
+    )
+    assert (sensors["sensor_7"].unit, sensors["sensor_7"].kind) == ("", None)
+    assert parse_official_sensors({}) == {}

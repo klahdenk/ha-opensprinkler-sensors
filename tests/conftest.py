@@ -47,6 +47,8 @@ def controller_payloads() -> dict[str, Any]:
             "stn_dis": [0b00001000],
         },
         "js": {"sn": [0, 1, 0, 0, 0, 0, 0, 0], "nstations": 8},
+        # Default fixture is OpenSprinklerShop firmware: no official /jsn API.
+        "jsn": {"result": 32},
         "sl": {
             "count": 2,
             "detected": 0,
@@ -85,3 +87,40 @@ def mock_controller(aioclient_mock) -> Callable[..., dict[str, Any]]:
         return payloads
 
     return _register
+
+
+def official_sensor_payloads() -> dict[str, Any]:
+    """Overrides for official firmware 2.2.1(5)+: /jsn instead of /sl + /sg.
+
+    Shaped like a real OpenSprinkler v4.0 response (VH400 soil sensors, unit 40
+    = %VMC), plus a temperature sensor and one reporting a read error.
+    """
+
+    def sensor(uuid: int, name: str, unit: int, value: float, status: int = 1) -> dict[str, Any]:
+        return {
+            "uuid": uuid,
+            "name": name,
+            "unit": unit,
+            "flag": 5,
+            "status": status,
+            "interval": 1,
+            "min": 0,
+            "max": 100,
+            "value": value,
+            "type": 1,
+            "extra": {"pin": uuid, "scale": 1, "offset": 0, "subtype": 15},
+        }
+
+    return {
+        "jsn": {
+            "sn": [
+                sensor(1, "Center tree soil", 40, 43.1132),
+                sensor(2, "Back yard fence soil", 40, 29.5963),
+                sensor(3, "Shed temperature", 17, 18.25),
+                sensor(4, "Broken probe", 40, 0.0, status=3),  # valid + error bits
+            ],
+            "count": 4,
+        },
+        "sl": {"result": 32},
+        "sg": {"result": 32},
+    }

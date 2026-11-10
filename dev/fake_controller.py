@@ -9,6 +9,9 @@ data that changes over time, so dashboards have something real to show:
 - soil moisture rises after the matching zone waters, then dries out;
 - a week of watering history is in the log, so "last on" is filled at startup.
 
+Analog sensors are served the way official firmware 2.2.1(5)+ does (``/jsn``)
+by default; ``--api shop`` serves OpenSprinklerShop's ``/sl`` + ``/sg`` instead.
+
 Stdlib only. Password: ``opendoor``.
 
     python3 dev/fake_controller.py --port 8099
@@ -45,7 +48,11 @@ ANALOG = [
     (4, "Bed temperature", 2, "°C", None, 14.0),
 ]
 
+# Official firmware unit IDs for the same sensors: 40 = %VMC, 17 = °C.
+OFFICIAL_UNITS = {1: 40, 2: 17}
+
 STARTED = time.time()
+SENSOR_API = "official"
 
 
 def utc_offset() -> int:
@@ -126,6 +133,12 @@ def moisture(t: float, zone: int | None, base: float) -> float:
     return round(max(0.0, min(100.0, value)), 1)
 
 
+def analog_value(t: float, unit_id: int, zone: int | None, base: float) -> float:
+    if unit_id == 1:
+        return moisture(t, zone, base)
+    return round(base + 4 * math.sin(t / 1800), 1)
+
+
 def respond(path: str, query: dict[str, list[str]]) -> object:
     now = time.time()
     if query.get("pw", [""])[0] != PASSWORD_HASH:
@@ -160,17 +173,37 @@ def respond(path: str, query: dict[str, list[str]]) -> object:
         return {"sn": [int(i == zone) for i in range(len(ZONES))], "nstations": len(ZONES)}
     if path == "jl":
         return history(int(query.get("hist", ["7"])[0]), now)
-    if path == "sl":
+    if path == "jsn" and SENSOR_API == "official":
+        sensors = []
+        for nr, name, unit_id, _unit, zone, base in ANALOG:
+            value = analog_value(now, unit_id, zone, base)
+            sensors.append(
+                {
+                    "uuid": nr,
+                    "name": name,
+                    "unit": OFFICIAL_UNITS[unit_id],
+                    "flag": 5,
+                    "status": 1,
+                    "interval": 1,
+                    "min": 0,
+                    "max": 100,
+                    "value": value,
+                    "type": 1,
+                    "extra": {"pin": nr, "scale": 1, "offset": 0, "subtype": 15},
+                }
+            )
+        return {"sn": sensors, "count": len(sensors)}
+    if path == "sl" and SENSOR_API == "shop":
         return {
             "count": len(ANALOG),
             "detected": 0,
             "sensors": [{"nr": nr, "type": 1, "name": name} for nr, name, *_ in ANALOG],
         }
-    if path == "sg":
+    if path == "sg" and SENSOR_API == "shop":
         last = local(now - now % 60)
         datas = []
         for nr, _name, unit_id, unit, zone, base in ANALOG:
-            value = moisture(now, zone, base) if unit_id == 1 else round(base + 4 * math.sin(now / 1800), 1)
+            value = analog_value(now, unit_id, zone, base)
             datas.append(
                 {
                     "nr": nr,
@@ -203,8 +236,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8099)
+    parser.add_argument(
+        "--api",
+        choices=["official", "shop"],
+        default="official",
+        help="analog sensor API to emulate: official /jsn, or OpenSprinklerShop /sl + /sg",
+    )
     args = parser.parse_args()
-    print(f"Fake OpenSprinkler on http://{args.host}:{args.port} (password: opendoor)", flush=True)
+    global SENSOR_API
+    SENSOR_API = args.api
+    print(
+        f"Fake OpenSprinkler on http://{args.host}:{args.port} ({args.api} sensor API, password: opendoor)",
+        flush=True,
+    )
     ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
 
 

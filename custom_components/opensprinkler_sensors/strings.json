@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to OpenSprinkler",
-        "description": "Soil moisture readings need OpenSprinklerShop firmware 2.3.0 or newer with the Analog Sensor API. \"Last on\" times work on any firmware.",
+        "description": "Soil moisture readings need official OpenSprinkler firmware 2.2.1(5) or newer, or OpenSprinklerShop firmware 2.3.0 or newer. \"Last on\" times work on any firmware.",
         "data": {
           "host": "Host",
           "password": "Password"

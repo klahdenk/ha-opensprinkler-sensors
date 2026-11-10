@@ -70,12 +70,16 @@ class OpenSprinklerClient:
         """``/jn``: zone names and attributes."""
         return await self._get_dict("jn")
 
+    async def official_sensors(self) -> dict[str, Any]:
+        """``/jsn``: sensor names and values (official firmware 2.2.1(5)+)."""
+        return await self._get_dict("jsn")
+
     async def sensor_list(self) -> dict[str, Any]:
-        """``/sl``: analog sensor configuration (Analog Sensor API only)."""
+        """``/sl``: analog sensor configuration (OpenSprinklerShop firmware)."""
         return await self._get_dict("sl")
 
     async def sensor_values(self) -> dict[str, Any]:
-        """``/sg``: latest analog sensor readings (Analog Sensor API only)."""
+        """``/sg``: latest analog sensor readings (OpenSprinklerShop firmware)."""
         return await self._get_dict("sg")
 
     async def log(self, days: int) -> list[Any]:

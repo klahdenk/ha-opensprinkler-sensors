@@ -3,9 +3,8 @@
 A Home Assistant integration that reads two things from an
 [OpenSprinkler](https://opensprinkler.com) controller over its local HTTP API:
 
-- **Soil moisture**, plus any other analog sensor (temperature, humidity,
-  voltage, water level and so on) connected through the
-  [Analog Sensor API](https://opensprinklershop.github.io/analog-sensor-config/).
+- **Soil moisture**, plus any other analog sensor (temperature, pressure,
+  voltage, water level and so on) configured on the controller.
 - **When each zone and sensor input was last on**, as timestamp sensors. These
   survive Home Assistant restarts and are seeded from the controller's own run
   log, so they're correct from the moment you install.
@@ -19,9 +18,11 @@ only reads; it never starts or stops anything.
 | Feature | Firmware |
 | --- | --- |
 | "Last on" for zones and the rain/soil sensor inputs | Any OpenSprinkler firmware 2.1.9+ |
-| Soil moisture and other analog readings | [OpenSprinklerShop firmware](https://opensprinklershop.github.io/) 2.3.0+ with the Analog Sensor API |
+| Soil moisture and other analog readings | Official OpenSprinkler firmware **2.2.1(5)+** (sensors on the v4.0 built-in ports or a [Sensor Expander](https://opensprinkler.com/product/sensor-expander/)), or [OpenSprinklerShop firmware](https://opensprinklershop.github.io/) 2.3.0+ with its Analog Sensor API |
 
-On stock firmware the analog sensors are skipped and everything else still works.
+The integration detects which sensor API the firmware has (official `/jsn`
+first, then OpenSprinklerShop's `/sl` + `/sg`). On firmware with neither, the
+analog sensors are skipped and everything else still works.
 
 ## Installation
 
@@ -56,7 +57,7 @@ appear automatically, with no reload needed.
 
 | Entity | Example | Notes |
 | --- | --- | --- |
-| Analog sensor | `sensor.opensprinkler_tomatoes` | Named as on the controller. Soil moisture sensors use the `moisture` device class and `%`. Attributes: `sensor_number`, `last_read`. |
+| Analog sensor | `sensor.opensprinkler_tomatoes` | Named as on the controller. Soil moisture (%VMC on official firmware) uses the `moisture` device class and `%`; other units map to the matching device class where Home Assistant has one. A read error or stale reading shows as unknown. Attributes: `sensor_number`, and `last_read` on OpenSprinklerShop firmware. |
 | Zone last on | `sensor.opensprinkler_front_lawn_last_on` | Timestamp. Disabled zones are skipped. Attributes: `on` (`true` while the zone runs) and `last_run_duration` (seconds; elapsed so far while running). |
 | Sensor input last on | `sensor.opensprinkler_rain_sensor_last_on` | For sensor inputs 1 and 2 when set to rain, soil or program switch. Flow meters are skipped. Same attributes as zones. |
 

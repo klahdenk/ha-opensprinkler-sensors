@@ -14,15 +14,22 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     LIGHT_LUX,
     PERCENTAGE,
+    UnitOfElectricCurrent,
     UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfPower,
     UnitOfPrecipitationDepth,
+    UnitOfPressure,
     UnitOfSpeed,
     UnitOfTemperature,
     UnitOfVolume,
+    UnitOfVolumeFlowRate,
+    UnitOfVolumetricFlux,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from . import model
 from .coordinator import OpenSprinklerConfigEntry, OpenSprinklerCoordinator
 from .entity import OpenSprinklerEntity
 from .model import (
@@ -31,21 +38,7 @@ from .model import (
     SENSOR_TYPE_PROGRAM_SWITCH,
     SENSOR_TYPE_RAIN,
     SENSOR_TYPE_SOIL,
-    UNIT_DEGREE,
-    UNIT_FAHRENHEIT,
-    UNIT_GALLON,
-    UNIT_GALLON_CONSUMPTION,
-    UNIT_HUM_PERCENT,
-    UNIT_INCH,
-    UNIT_KMH,
-    UNIT_LEVEL,
-    UNIT_LITER,
-    UNIT_LITER_CONSUMPTION,
-    UNIT_LX,
-    UNIT_MM,
-    UNIT_MPH,
-    UNIT_PERCENT,
-    UNIT_VOLT,
+    AnalogSensor,
     is_on,
     station_key,
 )
@@ -53,39 +46,48 @@ from .model import (
 # The controller is polled centrally by the coordinator.
 PARALLEL_UPDATES = 0
 
-# Analog unit ID -> (unit, device class, state class).
-_UNITS: dict[int, tuple[str | None, SensorDeviceClass | None, SensorStateClass]] = {
-    UNIT_PERCENT: (PERCENTAGE, SensorDeviceClass.MOISTURE, SensorStateClass.MEASUREMENT),
-    UNIT_DEGREE: (UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT),
-    UNIT_FAHRENHEIT: (
-        UnitOfTemperature.FAHRENHEIT,
-        SensorDeviceClass.TEMPERATURE,
-        SensorStateClass.MEASUREMENT,
+_M = SensorStateClass.MEASUREMENT
+_TOTAL = SensorStateClass.TOTAL_INCREASING
+_D = SensorDeviceClass
+
+# What an analog sensor measures (model.KIND_*) -> (unit, device class, state class).
+_KINDS: dict[str, tuple[str | None, SensorDeviceClass | None, SensorStateClass]] = {
+    model.KIND_MOISTURE: (PERCENTAGE, _D.MOISTURE, _M),
+    model.KIND_HUMIDITY: (PERCENTAGE, _D.HUMIDITY, _M),
+    model.KIND_PERCENT: (PERCENTAGE, None, _M),
+    model.KIND_TEMPERATURE_C: (UnitOfTemperature.CELSIUS, _D.TEMPERATURE, _M),
+    model.KIND_TEMPERATURE_F: (UnitOfTemperature.FAHRENHEIT, _D.TEMPERATURE, _M),
+    model.KIND_TEMPERATURE_K: (UnitOfTemperature.KELVIN, _D.TEMPERATURE, _M),
+    model.KIND_VOLTAGE: (UnitOfElectricPotential.VOLT, _D.VOLTAGE, _M),
+    model.KIND_VOLTAGE_MV: (UnitOfElectricPotential.MILLIVOLT, _D.VOLTAGE, _M),
+    model.KIND_CURRENT_A: (UnitOfElectricCurrent.AMPERE, _D.CURRENT, _M),
+    model.KIND_CURRENT_MA: (UnitOfElectricCurrent.MILLIAMPERE, _D.CURRENT, _M),
+    model.KIND_POWER_W: (UnitOfPower.WATT, _D.POWER, _M),
+    model.KIND_ENERGY_WH: (UnitOfEnergy.WATT_HOUR, _D.ENERGY, _TOTAL),
+    model.KIND_ENERGY_KWH: (UnitOfEnergy.KILO_WATT_HOUR, _D.ENERGY, _TOTAL),
+    model.KIND_PRESSURE_KPA: (UnitOfPressure.KPA, _D.PRESSURE, _M),
+    model.KIND_PRESSURE_BAR: (UnitOfPressure.BAR, _D.PRESSURE, _M),
+    model.KIND_PRESSURE_PA: (UnitOfPressure.PA, _D.PRESSURE, _M),
+    model.KIND_PRESSURE_PSI: (UnitOfPressure.PSI, _D.PRESSURE, _M),
+    model.KIND_ILLUMINANCE: (LIGHT_LUX, _D.ILLUMINANCE, _M),
+    model.KIND_PRECIPITATION_MM: (UnitOfPrecipitationDepth.MILLIMETERS, _D.PRECIPITATION, _M),
+    model.KIND_PRECIPITATION_IN: (UnitOfPrecipitationDepth.INCHES, _D.PRECIPITATION, _M),
+    model.KIND_RAIN_RATE_MM_H: (
+        UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
+        _D.PRECIPITATION_INTENSITY,
+        _M,
     ),
-    UNIT_VOLT: (UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT),
-    UNIT_HUM_PERCENT: (PERCENTAGE, SensorDeviceClass.HUMIDITY, SensorStateClass.MEASUREMENT),
-    UNIT_INCH: (
-        UnitOfPrecipitationDepth.INCHES,
-        SensorDeviceClass.PRECIPITATION,
-        SensorStateClass.MEASUREMENT,
-    ),
-    UNIT_MM: (
-        UnitOfPrecipitationDepth.MILLIMETERS,
-        SensorDeviceClass.PRECIPITATION,
-        SensorStateClass.MEASUREMENT,
-    ),
-    UNIT_MPH: (UnitOfSpeed.MILES_PER_HOUR, SensorDeviceClass.WIND_SPEED, SensorStateClass.MEASUREMENT),
-    UNIT_KMH: (UnitOfSpeed.KILOMETERS_PER_HOUR, SensorDeviceClass.WIND_SPEED, SensorStateClass.MEASUREMENT),
-    UNIT_LEVEL: (PERCENTAGE, None, SensorStateClass.MEASUREMENT),
-    UNIT_LX: (LIGHT_LUX, SensorDeviceClass.ILLUMINANCE, SensorStateClass.MEASUREMENT),
-    UNIT_LITER: (UnitOfVolume.LITERS, SensorDeviceClass.VOLUME_STORAGE, SensorStateClass.MEASUREMENT),
-    UNIT_GALLON: (UnitOfVolume.GALLONS, SensorDeviceClass.VOLUME_STORAGE, SensorStateClass.MEASUREMENT),
-    UNIT_LITER_CONSUMPTION: (UnitOfVolume.LITERS, SensorDeviceClass.WATER, SensorStateClass.TOTAL_INCREASING),
-    UNIT_GALLON_CONSUMPTION: (
-        UnitOfVolume.GALLONS,
-        SensorDeviceClass.WATER,
-        SensorStateClass.TOTAL_INCREASING,
-    ),
+    model.KIND_RAIN_RATE_IN_H: (UnitOfVolumetricFlux.INCHES_PER_HOUR, _D.PRECIPITATION_INTENSITY, _M),
+    model.KIND_SPEED_MS: (UnitOfSpeed.METERS_PER_SECOND, _D.SPEED, _M),
+    model.KIND_SPEED_KMH: (UnitOfSpeed.KILOMETERS_PER_HOUR, _D.WIND_SPEED, _M),
+    model.KIND_SPEED_MPH: (UnitOfSpeed.MILES_PER_HOUR, _D.WIND_SPEED, _M),
+    model.KIND_VOLUME_L: (UnitOfVolume.LITERS, _D.VOLUME_STORAGE, _M),
+    model.KIND_VOLUME_GAL: (UnitOfVolume.GALLONS, _D.VOLUME_STORAGE, _M),
+    model.KIND_WATER_L: (UnitOfVolume.LITERS, _D.WATER, _TOTAL),
+    model.KIND_WATER_GAL: (UnitOfVolume.GALLONS, _D.WATER, _TOTAL),
+    model.KIND_FLOW_L_MIN: (UnitOfVolumeFlowRate.LITERS_PER_MINUTE, _D.VOLUME_FLOW_RATE, _M),
+    model.KIND_FLOW_GPM: (UnitOfVolumeFlowRate.GALLONS_PER_MINUTE, _D.VOLUME_FLOW_RATE, _M),
+    model.KIND_PH: (None, _D.PH, _M),
 }
 
 _INPUT_LABELS = {
@@ -122,11 +124,10 @@ async def async_setup_entry(
             known.add(key)
             new.append(LastOnSensor(coordinator, key))
 
-        for nr, analog in data.analog.items():
-            key = f"analog_{nr}"
+        for key, analog in data.analog.items():
             if key not in known:
                 known.add(key)
-                new.append(AnalogSensorEntity(coordinator, nr, analog.unit_id, analog.unit))
+                new.append(AnalogSensorEntity(coordinator, analog))
 
         if new:
             async_add_entities(new)
@@ -136,32 +137,29 @@ async def async_setup_entry(
 
 
 class AnalogSensorEntity(OpenSprinklerEntity, SensorEntity):
-    """A reading from the Analog Sensor API, e.g. soil moisture."""
+    """An analog sensor reading, e.g. soil moisture."""
 
-    def __init__(
-        self,
-        coordinator: OpenSprinklerCoordinator,
-        nr: int,
-        unit_id: int,
-        unit: str,
-    ) -> None:
-        super().__init__(coordinator, f"analog_{nr}")
-        self._nr = nr
-        native_unit, device_class, state_class = _UNITS.get(
-            unit_id, (unit or None, None, SensorStateClass.MEASUREMENT)
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: OpenSprinklerCoordinator, analog: AnalogSensor) -> None:
+        super().__init__(coordinator, analog.key)
+        self._key = analog.key
+        self._number = analog.number
+        native_unit, device_class, state_class = _KINDS.get(
+            analog.kind or "", (analog.unit.strip() or None, None, _M)
         )
         self._attr_native_unit_of_measurement = native_unit
         self._attr_device_class = device_class
         self._attr_state_class = state_class
 
     @property
-    def _analog(self):
-        return self.coordinator.data.analog.get(self._nr)
+    def _analog(self) -> AnalogSensor | None:
+        return self.coordinator.data.analog.get(self._key)
 
     @property
     def name(self) -> str:
         analog = self._analog
-        return analog.name if analog else f"Sensor {self._nr}"
+        return analog.name if analog else f"Sensor {self._number}"
 
     @property
     def available(self) -> bool:
@@ -175,10 +173,10 @@ class AnalogSensorEntity(OpenSprinklerEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         analog = self._analog
-        return {
-            "sensor_number": self._nr,
-            "last_read": analog.last_read.isoformat() if analog and analog.last_read else None,
-        }
+        attributes: dict[str, Any] = {"sensor_number": self._number}
+        if analog and analog.last_read:
+            attributes["last_read"] = analog.last_read.isoformat()
+        return attributes
 
 
 class LastOnSensor(OpenSprinklerEntity, RestoreSensor):

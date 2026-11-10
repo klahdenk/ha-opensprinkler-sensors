@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .conftest import BASE_URL, PW_HASH
+from .conftest import BASE_URL, PW_HASH, official_sensor_payloads
 
 
 def _entry() -> MockConfigEntry:
@@ -49,6 +49,7 @@ async def test_soil_moisture_and_other_analog_sensors(hass: HomeAssistant, mock_
     mock_controller()
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.sensor_api == "shop"
 
     moisture = hass.states.get("sensor.opensprinkler_tomatoes")
     assert moisture is not None
@@ -133,10 +134,48 @@ async def test_disabled_zones_get_no_entity(hass: HomeAssistant, mock_controller
     assert hass.states.get("sensor.opensprinkler_s08_last_on") is not None
 
 
+async def test_official_firmware_sensors(hass: HomeAssistant, mock_controller) -> None:
+    mock_controller(**official_sensor_payloads())
+    entry = await _setup(hass)
+    assert entry.runtime_data.sensor_api == "official"
+
+    soil = hass.states.get("sensor.opensprinkler_center_tree_soil")
+    assert soil is not None
+    assert float(soil.state) == 43.1132
+    assert soil.attributes["device_class"] == "moisture"
+    assert soil.attributes["unit_of_measurement"] == "%"
+    assert soil.attributes["sensor_number"] == 1
+    assert "last_read" not in soil.attributes
+
+    temperature = hass.states.get("sensor.opensprinkler_shed_temperature")
+    assert temperature.attributes["device_class"] == "temperature"
+    assert float(temperature.state) == 18.25
+
+    # A read error shows as unknown rather than a bogus 0 %.
+    assert hass.states.get("sensor.opensprinkler_broken_probe").state == "unknown"
+    # Last-on sensors are unaffected by which sensor API the firmware has.
+    assert hass.states.get("sensor.opensprinkler_front_lawn_last_on") is not None
+
+    registry = er.async_get(hass)
+    unique_ids = {e.unique_id for e in er.async_entries_for_config_entry(registry, entry.entry_id)}
+    assert "aa:bb:cc:dd:ee:ff_sensor_1" in unique_ids
+
+
+async def test_official_sensor_values_update(hass: HomeAssistant, mock_controller) -> None:
+    payloads = mock_controller(**official_sensor_payloads())
+    entry = await _setup(hass)
+    payloads["jsn"]["sn"][0]["value"] = 51.0
+    mock_controller(**payloads)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert float(hass.states.get("sensor.opensprinkler_center_tree_soil").state) == 51.0
+
+
 async def test_stock_firmware_without_analog_api(hass: HomeAssistant, mock_controller) -> None:
     mock_controller(sl={"result": 32}, sg={"result": 32})
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.sensor_api is None
     assert hass.states.get("sensor.opensprinkler_tomatoes") is None
     assert hass.states.get("sensor.opensprinkler_front_lawn_last_on") is not None
 
