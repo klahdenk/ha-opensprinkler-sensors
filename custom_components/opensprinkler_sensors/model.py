@@ -13,7 +13,7 @@ API references:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import re
@@ -60,7 +60,8 @@ def parse_response(status: int, text: str) -> Any:
     except ValueError as err:
         raise OpenSprinklerResponseError("Response was not valid JSON") from err
 
-    if isinstance(data, dict) and set(data) == {"result"}:
+    # Error replies are {"result": code}, sometimes with an extra "item" field.
+    if isinstance(data, dict) and "result" in data and set(data) <= {"result", "item"}:
         code = data["result"]
         if code == RESULT_SUCCESS:
             return data
@@ -383,6 +384,48 @@ def parse_analog_sensors(
             last_read=last_read,
         )
     return sensors
+
+
+# --- Sensor log backfill -----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HourlyStat:
+    """One hour of a sensor's logged readings, ready for HA long-term statistics."""
+
+    start: datetime  # UTC, on the hour
+    mean: float
+    min: float
+    max: float
+
+
+def hourly_statistics(
+    records: list[Any],
+    uuid: int,
+    offset: int,
+    before: datetime,
+) -> list[HourlyStat]:
+    """Bucket ``/jsl`` records (``[uuid, local_ts, value]``) into UTC hours.
+
+    Only records for ``uuid`` are used, and only whole hours that start before
+    ``before`` (pass the start of the current hour so a half-finished hour is
+    never imported). Sorted oldest first.
+    """
+    buckets: dict[datetime, list[float]] = {}
+    for record in records:
+        if not isinstance(record, list) or len(record) < 3 or record[0] != uuid:
+            continue
+        when = local_epoch_to_utc(record[1], offset)
+        value = _number(record[2])
+        if when is None or value is None:
+            continue
+        hour = when.replace(minute=0, second=0, microsecond=0)
+        if hour + timedelta(hours=1) <= before:
+            buckets.setdefault(hour, []).append(value)
+    return [
+        HourlyStat(start=hour, mean=sum(values) / len(values), min=min(values), max=max(values))
+        for hour, values in sorted(buckets.items())
+    ]
 
 
 # --- "Last on" tracking -----------------------------------------------------

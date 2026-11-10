@@ -61,6 +61,16 @@ appear automatically, with no reload needed.
 | Zone last on | `sensor.opensprinkler_front_lawn_last_on` | Timestamp. Disabled zones are skipped. Attributes: `on` (`true` while the zone runs) and `last_run_duration` (seconds; elapsed so far while running). |
 | Sensor input last on | `sensor.opensprinkler_rain_sensor_last_on` | For sensor inputs 1 and 2 when set to rain, soil or program switch. Flow meters are skipped. Same attributes as zones. |
 
+**History from before installation.** On official firmware, sensors with
+**Logging** enabled (OpenSprinkler app → Edit Sensors) keep their own history
+on the controller. When an analog sensor entity is added, the integration
+imports up to 30 days of that log into Home Assistant's long-term statistics as
+hourly mean/min/max, for the hours before Home Assistant's own statistics for
+that sensor begin, so it never overwrites anything Home Assistant recorded
+itself. History and statistics graphs then cover the time before the
+integration was installed. Without logging enabled there is nothing to import,
+and history simply starts when the integration does.
+
 "Last on" is the end of the most recent run, or *now* while the zone is
 running. It's built from the controller log (the last 7 days on startup, then
 topped up hourly), the controller's last-run record, and live status polled every

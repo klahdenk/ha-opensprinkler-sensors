@@ -17,3 +17,7 @@ SLOW_REFRESH_INTERVAL = timedelta(hours=1)
 LOG_SEED_DAYS = 7
 
 REQUEST_TIMEOUT = 15
+
+# How far back analog sensor history is imported from the controller's own
+# sensor log (official firmware /jsl) into Home Assistant's statistics.
+BACKFILL_DAYS = 30

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import aiohttp
@@ -32,13 +33,17 @@ class OpenSprinklerClient:
         self.base_url = base_url
         self._password_hash = password_hash
         self._timeout = aiohttp.ClientTimeout(total=timeout)
+        # The controller serves one request at a time; background work such as
+        # the sensor log backfill must not overlap the coordinator's polls.
+        self._lock = asyncio.Lock()
 
     async def _get(self, path: str, **params: Any) -> Any:
         query = {"pw": self._password_hash, **{k: str(v) for k, v in params.items()}}
         try:
-            async with self._session.get(
-                f"{self.base_url}/{path}", params=query, timeout=self._timeout
-            ) as resp:
+            async with (
+                self._lock,
+                self._session.get(f"{self.base_url}/{path}", params=query, timeout=self._timeout) as resp,
+            ):
                 text = await resp.text()
                 status = resp.status
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -73,6 +78,17 @@ class OpenSprinklerClient:
     async def official_sensors(self) -> dict[str, Any]:
         """``/jsn``: sensor names and values (official firmware 2.2.1(5)+)."""
         return await self._get_dict("jsn")
+
+    async def sensor_log(self, uuid: int, after: int, before: int) -> list[Any]:
+        """``/jsl``: logged readings ``[[uuid, time, value], ...]`` for one sensor.
+
+        ``after``/``before`` are controller-local epoch seconds. A controller that
+        has never logged anything answers with an error instead of ``[]``.
+        """
+        data = await self._get("jsl", uuid=uuid, after=after, before=before, count="all")
+        if not isinstance(data, list):
+            raise OpenSprinklerResponseError("/jsl did not return a list")
+        return data
 
     async def sensor_list(self) -> dict[str, Any]:
         """``/sl``: analog sensor configuration (OpenSprinklerShop firmware)."""

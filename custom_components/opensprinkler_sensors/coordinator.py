@@ -41,6 +41,8 @@ class OpenSprinklerData:
     station_status: list[int]
     sensor_types: dict[str, int]
     analog: dict[str, AnalogSensor] = field(default_factory=dict)
+    # Seconds the controller's local clock is ahead of UTC.
+    offset: int = 0
 
 
 class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
@@ -104,6 +106,7 @@ class OpenSprinklerCoordinator(DataUpdateCoordinator[OpenSprinklerData]):
             station_status=station_status,
             sensor_types=sensor_input_types(self._options),
             analog=self._parse_analog(analog_raw, offset),
+            offset=offset,
         )
 
     async def _async_slow_refresh(self, now: datetime, controller: dict[str, Any]) -> None:

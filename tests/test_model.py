@@ -17,6 +17,7 @@ from custom_components.opensprinkler_sensors.model import (
     OpenSprinklerNotSupportedError,
     OpenSprinklerResponseError,
     firmware_version,
+    hourly_statistics,
     is_on,
     local_epoch_to_utc,
     normalize_base_url,
@@ -64,6 +65,9 @@ def test_parse_response_success_and_errors() -> None:
         parse_response(404, "Not found")
     with pytest.raises(OpenSprinklerResponseError):
         parse_response(200, '{"result": 16}')
+    # Official firmware adds an "item" field to some error replies.
+    with pytest.raises(OpenSprinklerResponseError):
+        parse_response(200, '{"result": 80, "item": ""}')
     with pytest.raises(OpenSprinklerResponseError):
         parse_response(200, "<html>")
     with pytest.raises(OpenSprinklerAuthError):
@@ -305,3 +309,27 @@ def test_parse_official_sensors() -> None:
     )
     assert (sensors["sensor_7"].unit, sensors["sensor_7"].kind) == ("", None)
     assert parse_official_sensors({}) == {}
+
+
+def test_hourly_statistics() -> None:
+    hour = NOW.replace(minute=0)  # 12:00 UTC
+    local_hour = int(hour.timestamp()) + OFFSET
+
+    def at(minutes: int) -> int:
+        return local_hour + minutes * 60
+
+    records = [
+        [1, at(-120 + 10), 40.0],  # 10:10
+        [1, at(-120 + 50), 44.0],  # 10:50
+        [1, at(-60 + 5), 30.0],  # 11:05
+        [2, at(-60 + 5), 99.0],  # another sensor
+        [1, at(5), 50.0],  # 12:05: current, unfinished hour
+        [1, at(-60 + 20), "nan"],  # garbage value
+        [1, 0, 10.0],  # no timestamp
+        "garbage",
+    ]
+    stats = hourly_statistics(records, 1, OFFSET, before=hour)
+    assert [s.start for s in stats] == [hour - timedelta(hours=2), hour - timedelta(hours=1)]
+    assert (stats[0].mean, stats[0].min, stats[0].max) == (42.0, 40.0, 44.0)
+    assert (stats[1].mean, stats[1].min, stats[1].max) == (30.0, 30.0, 30.0)
+    assert hourly_statistics([], 1, OFFSET, before=hour) == []

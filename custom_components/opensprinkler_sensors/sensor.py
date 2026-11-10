@@ -30,6 +30,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import model
+from .backfill import async_backfill_sensor
 from .coordinator import OpenSprinklerConfigEntry, OpenSprinklerCoordinator
 from .entity import OpenSprinklerEntity
 from .model import (
@@ -151,6 +152,24 @@ class AnalogSensorEntity(OpenSprinklerEntity, SensorEntity):
         self._attr_native_unit_of_measurement = native_unit
         self._attr_device_class = device_class
         self._attr_state_class = state_class
+
+    async def async_added_to_hass(self) -> None:
+        """Import history the controller logged before this entity existed."""
+        await super().async_added_to_hass()
+        # The log is in native units; skip if the user changed the display unit.
+        if self.unit_of_measurement != self.native_unit_of_measurement:
+            return
+        self.hass.async_create_background_task(
+            async_backfill_sensor(
+                self.hass,
+                self.coordinator,
+                entity_id=self.entity_id,
+                uuid=self._number,
+                unit=self.native_unit_of_measurement,
+                device_class=self.device_class,
+            ),
+            f"opensprinkler_sensors backfill {self.entity_id}",
+        )
 
     @property
     def _analog(self) -> AnalogSensor | None:

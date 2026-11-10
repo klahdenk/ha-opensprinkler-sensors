@@ -1,7 +1,12 @@
 {
   "domain": "opensprinkler_sensors",
   "name": "OpenSprinkler Sensors",
-  "codeowners": ["@klahdenk"],
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@klahdenk"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/klahdenk/ha-opensprinkler-sensors",
   "integration_type": "device",

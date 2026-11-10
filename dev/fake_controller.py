@@ -7,7 +7,9 @@ data that changes over time, so dashboards have something real to show:
 - zones 1-4 run in sequence every 5 minutes (40 s each);
 - the rain sensor (input 1) is active for 2 minutes out of every 10;
 - soil moisture rises after the matching zone waters, then dries out;
-- a week of watering history is in the log, so "last on" is filled at startup.
+- a week of watering history is in the log, so "last on" is filled at startup;
+- (official API) three days of logged sensor readings on ``/jsl``, so the
+  integration's history backfill has something to import.
 
 Analog sensors are served the way official firmware 2.2.1(5)+ does (``/jsn``)
 by default; ``--api shop`` serves OpenSprinklerShop's ``/sl`` + ``/sg`` instead.
@@ -139,6 +141,33 @@ def analog_value(t: float, unit_id: int, zone: int | None, base: float) -> float
     return round(base + 4 * math.sin(t / 1800), 1)
 
 
+def sensor_log(query: dict[str, list[str]], now: float) -> list[list]:
+    """``/jsl``: a reading every 15 minutes for the last three days."""
+
+    def param(name: str, default: int) -> int:
+        try:
+            return int(query.get(name, [str(default)])[0])
+        except ValueError:
+            return default
+
+    uuid = param("uuid", -1)
+    after, before = param("after", 0), param("before", 2**32)
+    records = []
+    start = int(now - 3 * 86400) // 900 * 900
+    for t in range(start, int(now), 900):
+        if not after <= local(t) <= before:
+            continue
+        for nr, _name, unit_id, _unit, zone, base in ANALOG:
+            if uuid not in (-1, nr):
+                continue
+            if t >= STARTED:
+                value = analog_value(t, unit_id, zone, base)
+            else:  # before the fake started: a gentle daily cycle
+                value = round(base + 6 * math.sin(2 * math.pi * t / 86400 + nr), 1)
+            records.append([nr, local(t), value])
+    return records
+
+
 def respond(path: str, query: dict[str, list[str]]) -> object:
     now = time.time()
     if query.get("pw", [""])[0] != PASSWORD_HASH:
@@ -193,6 +222,8 @@ def respond(path: str, query: dict[str, list[str]]) -> object:
                 }
             )
         return {"sn": sensors, "count": len(sensors)}
+    if path == "jsl" and SENSOR_API == "official":
+        return sensor_log(query, now)
     if path == "sl" and SENSOR_API == "shop":
         return {
             "count": len(ANALOG),

@@ -121,6 +121,8 @@ def official_sensor_payloads() -> dict[str, Any]:
             ],
             "count": 4,
         },
+        # Logging never enabled: real firmware answers /jsl with an error, not [].
+        "jsl": {"result": 80, "item": ""},
         "sl": {"result": 32},
         "sg": {"result": 32},
     }
